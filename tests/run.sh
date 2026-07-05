@@ -154,6 +154,21 @@ touch "$ROOT/.ci-ok"
 out=$(ev Bash "" "git commit -m test" | hook pre-tool-dispatch.sh)
 assert_empty "CI 成功で commit 許可" x "$out"
 
+echo "== 9b. サーキットブレーカー =="
+bash "$PLUGIN/scripts/flow-start.sh" implement >/dev/null 2>&1
+ev Edit "$ROOT/src/main.ts" | hook post-tool-dispatch.sh >/dev/null
+export HARNESS_MAX_GATE_BLOCKS=2
+ev "" | hook stop-sequencer.sh >/dev/null   # block 1回目
+ev "" | hook stop-sequencer.sh >/dev/null   # block 2回目
+out=$(ev "" | hook stop-sequencer.sh)       # 3回目 → ブレーカー開放
+assert_contains "上限超過で block せず警告" "systemMessage" "$out"
+t "breaker_open が記録される" jq -e '.gates.refactor.status == "breaker_open"' "$HARNESS_STATE_DIR/testproj/$SID.json"
+out=$(ev "" | hook stop-sequencer.sh)
+assert_contains "次のゲートへ進む" "/qa-review" "$out"
+unset HARNESS_MAX_GATE_BLOCKS
+token=$(jq -r '.pending_token.token' "$HARNESS_STATE_DIR/testproj/$SID.json")
+bash "$PLUGIN/scripts/mark-gate-passed.sh" qa-review "$token" --skip "テスト用" >/dev/null
+
 echo "== 10. harness-map =="
 map="$TMP/map.md"
 bash "$PLUGIN/scripts/harness-map.sh" "$map" >/dev/null 2>&1

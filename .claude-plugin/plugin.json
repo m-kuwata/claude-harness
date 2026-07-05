@@ -1,6 +1,6 @@
 {
   "name": "claude-harness",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "宣言的 harness.yaml でワークフローゲート・ペルソナレビュー・CI/チケットアダプタを配布するハーネスフレームワーク",
   "author": {
     "name": "m-kuwata"

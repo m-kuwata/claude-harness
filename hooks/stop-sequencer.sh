@@ -62,9 +62,9 @@ while IFS= read -r gate; do
     [ "$dirty" != "true" ] && continue
   fi
 
-  # 通過済み・スキップ済み
+  # 通過済み・スキップ済み・ブレーカー開放済み
   status=$(jq -r --arg g "$skill" '.gates[$g].status // empty' "$sp")
-  [ "$status" = "passed" ] || [ "$status" = "skipped" ] && continue
+  [ "$status" = "passed" ] || [ "$status" = "skipped" ] || [ "$status" = "breaker_open" ] && continue
 
   # output 宣言ゲート: 成果物が存在すれば自動通過
   if [ -n "$output" ]; then
@@ -77,14 +77,33 @@ while IFS= read -r gate; do
     fi
   fi
 
-  # 未通過ゲート発見 → トークン発行して block
+  # 未通過ゲート発見 → トークン発行して block（同一ゲートの再 block は回数を数える）
+  max_blocks="${HARNESS_MAX_GATE_BLOCKS:-5}"
   token=$(jq -r --arg g "$skill" \
     'if .pending_token.gate == $g then .pending_token.token else empty end' "$sp")
   if [ -z "$token" ]; then
     token=$(new_token)
+    blocks=1
     tmp=$(mktemp)
     jq --arg g "$skill" --arg t "$token" \
-      '.pending_token = {gate:$g, token:$t, issued_at:(now|todate)}' "$sp" > "$tmp" && mv "$tmp" "$sp"
+      '.pending_token = {gate:$g, token:$t, issued_at:(now|todate), blocks:1}' "$sp" > "$tmp" && mv "$tmp" "$sp"
+  else
+    blocks=$(( $(jq -r '.pending_token.blocks // 1' "$sp") + 1 ))
+    tmp=$(mktemp)
+    jq --argjson b "$blocks" '.pending_token.blocks = $b' "$sp" > "$tmp" && mv "$tmp" "$sp"
+  fi
+
+  # サーキットブレーカー: 同一ゲートで max 回連続 block しても進捗がなければ
+  # ブロックをやめて解放する（無限ループでトークンを浪費しない）。
+  # ゲートは breaker_open として記録され、通過扱いにはならない。/flow 再宣言でリセット。
+  if [ "$blocks" -gt "$max_blocks" ]; then
+    tmp=$(mktemp)
+    jq --arg g "$skill" \
+      '.gates[$g] = {status:"breaker_open", at:(now|todate)} | .pending_token = null' \
+      "$sp" > "$tmp" && mv "$tmp" "$sp"
+    jq -nc --arg m "⚠ harness: ゲート /$skill が ${max_blocks} 回連続でブロックされたため、サーキットブレーカーで解放しました。ゲートは未通過（breaker_open）として記録されています。スキル名の誤り・ゲートスキルの不具合を確認してください（上限は HARNESS_MAX_GATE_BLOCKS で変更可）。" \
+      '{systemMessage:$m}'
+    exit 0
   fi
 
   plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
