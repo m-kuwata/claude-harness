@@ -2,7 +2,7 @@
 # lib.sh — エンジン共有関数。全フック・スクリプトが source する。
 # 依存: jq(必須), yq または python3+PyYAML(コンパイル時), python3(コンパイル時)
 
-HARNESS_ENGINE_VERSION="0.1.0"
+HARNESS_ENGINE_VERSION="0.2.0"
 STATE_ROOT="${HARNESS_STATE_DIR:-/tmp/claude-harness}"
 LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

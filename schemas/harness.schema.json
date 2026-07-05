@@ -1,0 +1,178 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/m-kuwata/claude-harness/main/schemas/harness.schema.json",
+  "title": "claude-harness 設定 (harness.yaml)",
+  "type": "object",
+  "required": ["version", "project", "workflows"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 0, "description": "スキーマバージョン" },
+    "project": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "description": "状態ディレクトリのキー" },
+        "state_dir": { "type": "string", "description": "状態ルート（省略時 /tmp/claude-harness）" }
+      }
+    },
+    "setup": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "require_tools": { "type": "array", "items": { "type": "string" } },
+        "git_hooks_path": { "type": "string" },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["run"],
+            "additionalProperties": false,
+            "properties": {
+              "run": { "type": "string" },
+              "if_exists": { "type": "string", "description": "このパスが存在するときのみ実行" }
+            }
+          }
+        }
+      }
+    },
+    "paths": {
+      "type": "object",
+      "description": "ファイル分類。キーがクラス名（impl / screen / test / exempt 等）",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["include"],
+        "additionalProperties": false,
+        "properties": {
+          "include": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "exclude": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "tickets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "enum": ["github-issues", "github-projects", "none"] },
+        "branch_format": { "type": "string", "description": "例: {type}/{n}-{slug}" },
+        "protected_branches": { "type": "array", "items": { "type": "string" } },
+        "allow_branch_prefixes": { "type": "array", "items": { "type": "string" } },
+        "escape_env": { "type": "string", "description": "緊急回避用の環境変数名" },
+        "exempt": { "type": "array", "items": { "type": "string" }, "description": "ガード対象外の paths クラス名" }
+      }
+    },
+    "ci": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "on_edit": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["run"],
+            "additionalProperties": false,
+            "properties": {
+              "paths": { "type": "array", "items": { "type": "string" } },
+              "run": { "type": "string", "description": "{file} {relfile} プレースホルダ可" },
+              "relative_to": { "type": "string" }
+            }
+          }
+        },
+        "on_commit": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["run"],
+            "additionalProperties": false,
+            "properties": {
+              "run": { "type": "string" },
+              "when_staged": { "type": "array", "items": { "type": "string" } },
+              "coverage_min": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+    "guards": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reuse": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["on_create", "inventory"],
+            "additionalProperties": false,
+            "properties": {
+              "on_create": { "type": "string", "description": "新規作成を監視する glob" },
+              "inventory": { "type": "string", "description": "既存資産を列挙するコマンド" }
+            }
+          }
+        }
+      }
+    },
+    "personas": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["agent"],
+        "additionalProperties": false,
+        "properties": {
+          "agent": { "type": "string", "description": "harness:<名前> はプラグイン同梱 agent" },
+          "model": { "type": "string" },
+          "context": { "type": "array", "items": { "type": "string" }, "description": "ペルソナに読ませる資料パス" }
+        }
+      }
+    },
+    "workflows": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "default": { "type": "boolean" },
+          "description": { "type": "string" },
+          "permissions": { "enum": ["edit", "read-only"], "default": "edit" },
+          "inputs": { "type": "array", "items": { "type": "string" } },
+          "entry": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "require_ticket": { "type": "boolean" },
+              "gates": { "$ref": "#/definitions/gates" }
+            }
+          },
+          "gates": { "$ref": "#/definitions/gates" }
+        }
+      }
+    },
+    "visualizer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "output": { "type": "string", "default": "docs/harness-map.md" },
+        "include_sessions": { "type": "boolean", "default": true }
+      }
+    }
+  },
+  "definitions": {
+    "gates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["skill"],
+        "additionalProperties": false,
+        "properties": {
+          "skill": { "type": "string", "description": "ゲートスキル名（/なし）" },
+          "when": { "type": "string", "description": "この paths クラスが dirty のときのみ要求" },
+          "optional": { "type": "boolean", "description": "--skip \"<理由>\" でスキップ通過可" },
+          "output": { "type": "string", "description": "成果物パス。{date} {slug} プレースホルダ可。存在すれば自動通過" },
+          "personas": { "type": "array", "items": { "type": "string" }, "description": "review-board が起動するペルソナ名" },
+          "min_diff_lines": { "type": "number", "description": "diff がこの行数未満ならスキップ（コスト制御）" },
+          "target": { "enum": ["branch", "pr"], "description": "review-board の diff 取得元" }
+        }
+      }
+    }
+  }
+}

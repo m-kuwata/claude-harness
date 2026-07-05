@@ -36,6 +36,8 @@ ev() { # イベント JSON 生成 $1=tool $2=file (省略可) $3=command (省略
 ROOT="$TMP/proj"
 mkdir -p "$ROOT/.claude" "$ROOT/src/app" "$ROOT/docs"
 cd "$ROOT" && git init -q -b main
+git -C "$ROOT" config user.email t@t && git -C "$ROOT" config user.name t
+echo init > "$ROOT/init.txt" && git -C "$ROOT" add -A && git -C "$ROOT" commit -qm init
 cat > "$ROOT/.claude/harness.yaml" <<'EOF'
 version: 0
 project: { name: testproj }
@@ -152,7 +154,39 @@ touch "$ROOT/.ci-ok"
 out=$(ev Bash "" "git commit -m test" | hook pre-tool-dispatch.sh)
 assert_empty "CI 成功で commit 許可" x "$out"
 
-echo "== 10. SessionEnd =="
+echo "== 10. harness-map =="
+map="$TMP/map.md"
+bash "$PLUGIN/scripts/harness-map.sh" "$map" >/dev/null 2>&1
+t "map 生成" test -f "$map"
+mapout=$(cat "$map" 2>/dev/null)
+assert_contains "mermaid 図を含む" '```mermaid' "$mapout"
+assert_contains "ワークフローを含む" "implement" "$mapout"
+assert_contains "稼働セッションを含む" "稼働中セッション" "$mapout"
+
+echo "== 11. harness-audit =="
+auditout=$(bash "$PLUGIN/scripts/harness-audit.sh" "$ROOT" 2>&1); rc=$?
+t "FATAL なしで exit 0" test "$rc" = 0
+assert_contains "コンパイル成功を報告" "コンパイル成功" "$auditout"
+assert_contains "欠落スキルを WARN" "WARN" "$auditout"
+
+echo "== 12. review-board-prep =="
+prep=$(bash "$PLUGIN/scripts/review-board-prep.sh" --personas qa 2>/dev/null)
+t "prep が valid JSON" jq -e '.diff_file' <<<"$prep"
+t "ペルソナ名を返す" jq -e '.personas[0].name == "qa"' <<<"$prep"
+
+echo "== 13. JSON Schema =="
+if python3 -c 'import jsonschema' 2>/dev/null; then
+  t "example.yaml がスキーマに適合" python3 -c "
+import json, yaml, jsonschema
+schema = json.load(open('$PLUGIN/schemas/harness.schema.json'))
+doc = yaml.safe_load(open('$PLUGIN/docs/harness.example.yaml'))
+jsonschema.validate(doc, schema)
+"
+else
+  echo "  skip: jsonschema 未導入"
+fi
+
+echo "== 14. SessionEnd =="
 ev "" | hook session-end.sh
 t "状態ファイルが削除される" test ! -f "$HARNESS_STATE_DIR/testproj/$SID.json"
 
