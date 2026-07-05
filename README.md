@@ -72,7 +72,7 @@ claude-harness/
 
 ## ステータス
 
-**エンジン + 全スキル実装済み（v0.2.0）**。E2E スモークテスト 37 件通過（`bash tests/run.sh`）。pokotto-box / classly でパイロット導入済み。
+**エンジン + 全スキル実装済み（v0.2.0）**。E2E スモークテスト 37 件通過（`bash tests/run.sh`）。pokotto-box / classly / ehon-note でパイロット導入済み。
 
 ### エンジンの依存
 
@@ -90,7 +90,9 @@ claude-harness/
 - [x] E2E スモークテスト（tests/run.sh・37 件）
 - [x] パイロット移行: pokotto-box / classly / ehon-note
 - [ ] hooks.json のプラグイン実地検証（実セッションでのフック発火）
-- [ ] takt YAML への書き出し（v1）
+
+> takt 連携は不採用とした。ワークフロー定義・順序保証・並列レビューはネイティブ機構で
+> 充足しており、無人バッチ実行の需要が生じた場合のみ lock.json からのエクスポータを検討する。
 
 ## 出自
 
