@@ -1,0 +1,13 @@
+{
+  "name": "m-kuwata",
+  "owner": {
+    "name": "m-kuwata"
+  },
+  "plugins": [
+    {
+      "name": "claude-harness",
+      "source": "./",
+      "description": "ハーネスフレームワーク本体（エンジン + 汎用スキル + ペルソナ）"
+    }
+  ]
+}
