@@ -88,8 +88,7 @@ claude-harness/
 - [x] 汎用ペルソナ agents（qa / po / architect / security）
 - [x] harness.schema.json（yaml-language-server 用）
 - [x] E2E スモークテスト（tests/run.sh・37 件）
-- [x] パイロット移行: pokotto-box / classly
-- [ ] パイロット移行: ehon-note
+- [x] パイロット移行: pokotto-box / classly / ehon-note
 - [ ] hooks.json のプラグイン実地検証（実セッションでのフック発火）
 - [ ] takt YAML への書き出し（v1）
 
