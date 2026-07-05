@@ -1,0 +1,71 @@
+# harness.yaml サンプル（最小構成 + 主要機能）
+# フルリファレンス: docs/schema-v0.md
+version: 0
+
+project:
+  name: myapp
+
+paths:
+  impl:
+    include: ["src/**/*.{ts,tsx}"]
+    exclude: ["**/*.{test,spec,stories}.{ts,tsx}"]
+  screen:
+    include: ["src/app/**/*.tsx"]
+    exclude: ["**/*.{test,spec,stories}.tsx"]
+  test:
+    include: ["**/*.{test,spec}.{ts,tsx}"]
+  exempt:
+    include: [".claude/**", "docs/**", "*.md"]
+
+tickets:
+  provider: github-issues
+  branch_format: "{type}/{n}-{slug}"
+  protected_branches: [main]
+  allow_branch_prefixes: [claude/]
+  escape_env: SKIP_ISSUE_CHECK
+  exempt: [exempt, test]
+
+ci:
+  on_edit:
+    - paths: ["**/*.{ts,tsx}"]
+      run: "npx eslint {file}"
+  on_commit:
+    - run: "npm run test:coverage"
+      coverage_min: 80
+    - run: "npx tsc --noEmit"
+
+personas:
+  qa:
+    agent: harness:qa-reviewer
+    context: [CLAUDE.md]
+  po:
+    agent: harness:po-reviewer
+    context: [docs/product-context.md]
+
+workflows:
+  implement:
+    default: true
+    description: issue 駆動の実装
+    permissions: edit
+    entry:
+      require_ticket: true
+      gates:
+        - skill: tdd
+    gates:
+      - skill: refactor
+        when: impl
+      - skill: project-review
+        when: impl
+      - skill: review-board
+        when: impl
+        personas: [qa, po]
+      - skill: design-check
+        when: screen
+        optional: true
+
+  investigate:
+    description: コードを変更しない調査
+    permissions: read-only
+    gates:
+      - skill: report
+        output: "docs/research/{date}-{slug}.md"
