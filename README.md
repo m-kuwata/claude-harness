@@ -72,14 +72,22 @@ claude-harness/
 
 ## ステータス
 
-**設計フェーズ**。スキーマ v0 とランタイム設計まで確定。エンジン実装はこれから。
+**エンジン実装済み（v0.1.0）**。E2E スモークテスト 27 件通過（`bash tests/run.sh`）。
+
+### エンジンの依存
+
+- 必須: `bash` / `jq` / `python3`
+- YAML パーサ（いずれか1つ）: `PyYAML`（優先）/ `yq`（mikefarah 版・kislyuk 版の両構文に対応）
 
 ### ロードマップ
 
 - [x] スキーマ v0 草案（4プロジェクトの現行資産との対応検証済み）
 - [x] ランタイム設計 v0
-- [ ] エンジン実装（ディスパッチャ5本 + mark-gate-passed）
-- [ ] スキル実装（/flow → /harness-init → /review-board → /harness-map）
+- [x] エンジン実装（ディスパッチャフック5本 + mark-gate-passed + flow-start）
+- [x] /flow スキル
+- [x] E2E スモークテスト（tests/run.sh）
+- [ ] スキル実装（/harness-init → /review-board → /harness-map → /config-audit）
+- [ ] 汎用ペルソナ agents（qa / po / architect / security）
 - [ ] harness.schema.json
 - [ ] パイロット移行: pokotto-box → classly → ehon-note
 
