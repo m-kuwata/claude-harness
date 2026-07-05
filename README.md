@@ -72,7 +72,7 @@ claude-harness/
 
 ## ステータス
 
-**エンジン実装済み（v0.1.0）**。E2E スモークテスト 27 件通過（`bash tests/run.sh`）。
+**エンジン + 全スキル実装済み（v0.2.0）**。E2E スモークテスト 37 件通過（`bash tests/run.sh`）。pokotto-box / classly でパイロット導入済み。
 
 ### エンジンの依存
 
@@ -84,12 +84,14 @@ claude-harness/
 - [x] スキーマ v0 草案（4プロジェクトの現行資産との対応検証済み）
 - [x] ランタイム設計 v0
 - [x] エンジン実装（ディスパッチャフック5本 + mark-gate-passed + flow-start）
-- [x] /flow スキル
-- [x] E2E スモークテスト（tests/run.sh）
-- [ ] スキル実装（/harness-init → /review-board → /harness-map → /config-audit）
-- [ ] 汎用ペルソナ agents（qa / po / architect / security）
-- [ ] harness.schema.json
-- [ ] パイロット移行: pokotto-box → classly → ehon-note
+- [x] スキル6本（/flow・/harness-init・/review-board・/harness-map・/config-audit・/report）
+- [x] 汎用ペルソナ agents（qa / po / architect / security）
+- [x] harness.schema.json（yaml-language-server 用）
+- [x] E2E スモークテスト（tests/run.sh・37 件）
+- [x] パイロット移行: pokotto-box / classly
+- [ ] パイロット移行: ehon-note
+- [ ] hooks.json のプラグイン実地検証（実セッションでのフック発火）
+- [ ] takt YAML への書き出し（v1）
 
 ## 出自
 
