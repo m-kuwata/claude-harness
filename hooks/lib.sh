@@ -2,7 +2,7 @@
 # lib.sh — エンジン共有関数。全フック・スクリプトが source する。
 # 依存: jq(必須), yq または python3+PyYAML(コンパイル時), python3(コンパイル時)
 
-HARNESS_ENGINE_VERSION="0.4.0"
+HARNESS_ENGINE_VERSION="0.5.0"
 STATE_ROOT="${HARNESS_STATE_DIR:-/tmp/claude-harness}"
 LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -189,8 +189,65 @@ session_known_roots() { # $1=session_id
   [ -f "$f" ] && cat "$f"
 }
 
-# 24h 超の状態・マーカー・PIDマップを掃除
+# 24h 超の状態・マーカー・PIDマップを掃除（/tmp 配下の使い捨て状態のみ。
+# 永続進捗ログ .claude-harness/progress.log はプロジェクト側にあり対象外）
 gc_state() {
   find "$STATE_ROOT" -type f -mmin +1440 -delete 2>/dev/null || true
   find "$STATE_ROOT" -type d -empty -delete 2>/dev/null || true
+}
+
+# ---- 永続進捗ログ（長時間・複数セッションのループを見えるようにする） ----
+# セッション状態（/tmp 配下）は SessionEnd で消えるため、Anthropic の
+# claude-progress.txt に相当する「セッションをまたいで残る進捗」を
+# プロジェクト側 .claude-harness/progress.log（JSONL, 追記専用）に持つ。
+# 消さない・削らない・上書きしない。harness-map がこれを読んで表示する。
+progress_log_path() { echo "$1/.claude-harness/progress.log"; } # $1=root
+
+# 進捗ログに1行追記する。$1=root $2=session_id $3=project $4=event種別 $5=detail(任意の文字列)
+log_progress_event() {
+  local root="$1" sid="$2" project="$3" event="$4" detail="${5:-}"
+  local f; f=$(progress_log_path "$root")
+  mkdir -p "$(dirname "$f")"
+  jq -nc --arg ts "$(date -Iseconds)" --arg sid "$sid" --arg p "$project" --arg e "$event" --arg d "$detail" \
+    '{ts:$ts, session_id:$sid, project:$p, event:$e, detail:$d}' >> "$f" 2>/dev/null || true
+}
+
+# harness.yaml の verify:/output: に書ける {session_id} プレースホルダを実値に置換する。
+# 固定パスを書くと複数セッション同時実行でアーティファクトが衝突するため、
+# セッション（さらにゲート名も含めれば1セッション内の複数ゲートでも）スコープを
+# 強制しやすくするための機構。$1=文字列 $2=session_id
+subst_session() {
+  echo "${1//\{session_id\}/$2}"
+}
+
+# レビュー/ゲート実行系スクリプトが共通で使う、セッション+ゲート名スコープの
+# アーティファクト置き場。複数セッション同時実行・同一セッション内の複数ゲートの
+# どちらでも衝突しない。$1=root $2=session_id $3=gate/skill名 $4=ファイル名（例: findings.json）
+gate_artifact_path() {
+  local dir=".claude-harness/$2/$3"
+  mkdir -p "$1/$dir" 2>/dev/null
+  echo "$dir/$4"
+}
+
+# 現在のブランチ diff（または --pr 指定時は PR diff）を一時ファイルに書き出し、
+# パスを返す。gh 未導入で PR diff を取得できない場合は空ファイルを返す
+# （呼び出し側が diff_pending 等で扱う）。$1=root $2=pr番号（空なら通常diff）
+gather_diff() {
+  local root="$1" pr="$2"
+  local diff_file; diff_file=$(mktemp "${TMPDIR:-/tmp}/harness-diff.XXXXXX")
+  if [ -n "$pr" ]; then
+    if command -v gh >/dev/null 2>&1; then
+      (cd "$root" && gh pr diff "$pr") > "$diff_file" 2>/dev/null
+    fi
+  else
+    local base
+    base=$(git -C "$root" merge-base HEAD origin/main 2>/dev/null \
+        || git -C "$root" merge-base HEAD main 2>/dev/null \
+        || git -C "$root" rev-parse HEAD~1 2>/dev/null || echo "")
+    {
+      [ -n "$base" ] && git -C "$root" diff "$base" 2>/dev/null || true
+      git -C "$root" diff 2>/dev/null || true
+    } > "$diff_file"
+  fi
+  echo "$diff_file"
 }

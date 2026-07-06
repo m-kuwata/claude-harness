@@ -7,6 +7,10 @@
 # そのため cwd 由来の1プロジェクトだけでなく、セッションが実際に触れた
 # 全プロジェクト（session_known_roots）を巡回し、いずれかに未通過ゲートが
 # あれば block する。
+#
+# gates[].verify / gates[].output に書かれた {session_id} は実セッションIDに
+# 置換してから評価する。固定パスのままだと複数セッション同時実行で
+# アーティファクトが衝突するため、必ずセッション単位にスコープさせる。
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -31,6 +35,8 @@ check_gates_for_root() {
   local workflow; workflow=$(jq -r '.workflow // empty' "$sp")
   [ -z "$workflow" ] && return 2   # フロー未宣言 = 編集もブロック済み = 強制対象なし
 
+  local project; project=$(jq -r '.project.name' "$lock")
+
   # 保留トークンのマーカーを回収して状態へ反映。
   # gates[].verify（シェルコマンド）が定義されている場合、"passed" 申告は
   # トークン一致だけでなく verify の exit 0 を確認できて初めて受理する
@@ -50,10 +56,12 @@ check_gates_for_root() {
           jq --arg g "$gate" --arg r "$reason" \
             '.gates[$g] = {status:"skipped", reason:$r, at:(now|todate)} | .pending_token = null' \
             "$sp" > "$tmp" && mv "$tmp" "$sp"
+          log_progress_event "$root" "$session_id" "$project" "gate_skipped" "$gate: $reason"
         else
           local verify_cmd
           verify_cmd=$(jq -r --arg w "$workflow" --arg g "$gate" \
             '((.workflows[$w].entry.gates // []) + (.workflows[$w].gates // [])) | .[] | select(.skill == $g) | .verify // empty' "$lock")
+          verify_cmd=$(subst_session "$verify_cmd" "$session_id")
           if [ -n "$verify_cmd" ]; then
             local vout vrc
             vout=$( (cd "$root" && eval "$verify_cmd") 2>&1 ); vrc=$?
@@ -61,17 +69,20 @@ check_gates_for_root() {
               tmp=$(mktemp)
               jq --arg g "$gate" '.gates[$g] = {status:"passed", at:(now|todate)} | .pending_token = null' \
                 "$sp" > "$tmp" && mv "$tmp" "$sp"
+              log_progress_event "$root" "$session_id" "$project" "gate_passed" "$gate (verify 済み)"
             else
               local detail; detail=$(echo "$vout" | tail -n 15)
               tmp=$(mktemp)
               jq --arg g "$gate" --arg d "$detail" \
                 '.gates[$g] = {status:"verify_failed", detail:$d, at:(now|todate)}' \
                 "$sp" > "$tmp" && mv "$tmp" "$sp"
+              log_progress_event "$root" "$session_id" "$project" "gate_verify_failed" "$gate"
             fi
           else
             tmp=$(mktemp)
             jq --arg g "$gate" '.gates[$g] = {status:"passed", at:(now|todate)} | .pending_token = null' \
               "$sp" > "$tmp" && mv "$tmp" "$sp"
+            log_progress_event "$root" "$session_id" "$project" "gate_passed" "$gate"
           fi
         fi
       fi
@@ -84,15 +95,14 @@ check_gates_for_root() {
   gates=$(jq -c --arg w "$workflow" \
     '((.workflows[$w].entry.gates // []) + (.workflows[$w].gates // []))[]' "$lock")
 
-  local project; project=$(jq -r '.project.name' "$lock")
-
   while IFS= read -r g; do
     [ -z "$g" ] && continue
-    local skill when optional output status
+    local skill when optional output agent status
     skill=$(echo "$g" | jq -r '.skill')
     when=$(echo "$g" | jq -r '.when // empty')
     optional=$(echo "$g" | jq -r '.optional // false')
     output=$(echo "$g" | jq -r '.output // empty')
+    agent=$(echo "$g" | jq -r '.agent // empty')
 
     if [ -n "$when" ]; then
       local dirty; dirty=$(jq -r --arg c "$when" '.dirty[$c] // false' "$sp")
@@ -105,9 +115,11 @@ check_gates_for_root() {
     if [ -n "$output" ]; then
       local og; og="${output//\{date\}/$(date +%Y-%m-%d)}"
       og="${og//\{slug\}/*}"
+      og=$(subst_session "$og" "$session_id")
       if compgen -G "$root/$og" >/dev/null 2>&1; then
         tmp=$(mktemp)
         jq --arg g "$skill" '.gates[$g] = {status:"passed", at:(now|todate)}' "$sp" > "$tmp" && mv "$tmp" "$sp"
+        log_progress_event "$root" "$session_id" "$project" "gate_passed" "$skill (成果物検知)"
         continue
       fi
     fi
@@ -133,25 +145,34 @@ check_gates_for_root() {
       jq --arg g "$skill" \
         '.gates[$g] = {status:"breaker_open", at:(now|todate)} | .pending_token = null' \
         "$sp" > "$tmp" && mv "$tmp" "$sp"
+      log_progress_event "$root" "$session_id" "$project" "gate_breaker_open" "$skill"
       jq -nc --arg m "⚠ harness [$project]: ゲート /$skill が ${max_blocks} 回連続でブロックされたため、サーキットブレーカーで解放しました。ゲートは未通過（breaker_open）として記録されています。スキル名の誤り・ゲートスキルの不具合を確認してください（上限は HARNESS_MAX_GATE_BLOCKS で変更可）。" \
         '{systemMessage:$m}'
       return 0
     fi
 
     local plugin_root; plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    # agent: が設定されたゲートは独立コンテキスト実行が必須。メインコンテキストで
+    # 直接 /<skill> を実行するのではなく /gate-run <skill> を案内する。
+    local run_hint
+    if [ -n "$agent" ]; then
+      run_hint="/gate-run $skill（独立コンテキストで実行。ペルソナ: $agent）"
+    else
+      run_hint="/$skill"
+    fi
     local msg
     if [ "$status" = "verify_failed" ]; then
       local detail; detail=$(jq -r --arg g "$skill" '.gates[$g].detail // empty' "$sp")
-      msg="harness ゲート [$project / $workflow]: /$skill の完了報告を検証しましたが、条件を満たしていませんでした。"
+      msg="harness ゲート [$project / $workflow]: $run_hint の完了報告を検証しましたが、条件を満たしていませんでした。"
       [ -n "$detail" ] && msg+=$'\n'"検証コマンドの出力:"$'\n'"$detail"
       msg+=$'\n'"問題を修正してから同じコマンドを再実行してください: \`bash $plugin_root/scripts/mark-gate-passed.sh $skill $gtoken\`"
       [ "$optional" = "true" ] && msg+=" このゲートは optional です。対象外と判断した場合は \`bash $plugin_root/scripts/mark-gate-passed.sh $skill $gtoken --skip \"<理由>\"\` でスキップできます（verify は迂回されます）。"
     else
-      msg="harness ゲート [$project / $workflow]: /$skill が未完了です。"
+      msg="harness ゲート [$project / $workflow]: $run_hint が未完了です。"
       if [ -n "$output" ]; then
         msg+=" 成果物 '$output' を作成してください（存在すれば自動通過します）。"
       else
-        msg+=" /$skill を完了してから \`bash $plugin_root/scripts/mark-gate-passed.sh $skill $gtoken\` を実行してください。"
+        msg+=" 完了してから \`bash $plugin_root/scripts/mark-gate-passed.sh $skill $gtoken\` を実行してください。"
         [ "$optional" = "true" ] && msg+=" このゲートは optional です。対象外と判断した場合は \`bash $plugin_root/scripts/mark-gate-passed.sh $skill $gtoken --skip \"<理由>\"\` でスキップできます。"
       fi
     fi

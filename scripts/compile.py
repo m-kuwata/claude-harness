@@ -160,6 +160,8 @@ def main():
             for p in g.get("personas") or []:
                 if p not in personas:
                     err(f"workflows.{name}.gates[{g.get('skill')}]: 未定義のペルソナ '{p}'")
+            if g.get("agent") and g["agent"] not in personas:
+                err(f"workflows.{name}.gates[{g.get('skill')}]: 未定義のペルソナ '{g['agent']}'（agent は personas 内の名前を指定する）")
         workflows[name] = w
 
     if errors:

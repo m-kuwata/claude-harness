@@ -56,6 +56,11 @@ jq --arg w "$workflow" --arg t "$ticket" \
   '.workflow = $w | .ticket = (if $t == "" then null else $t end)
    | .gates = {} | .dirty = {} | .pending_token = null' "$sp" > "$tmp" && mv "$tmp" "$sp"
 
+register_session_root "$session_id" "$root"
+project=$(jq -r '.project.name' "$lock")
+log_progress_event "$root" "$session_id" "$project" "workflow_started" \
+  "$workflow${ticket:+ (ticket: $ticket)}"
+
 # ゲート計画の提示（Claude がスキーマ内容を知る唯一の正規経路）
 echo ""
 echo "ワークフロー '$workflow' を開始しました。"
@@ -67,7 +72,8 @@ jq -r --arg w "$workflow" '
   ((.workflows[$w].entry.gates // []) | map("  [entry] /" + .skill)) +
   ((.workflows[$w].gates // []) | map(
     "  " + (if .when then "[" + .when + " 変更時] " else "" end) +
-    "/" + .skill +
+    (if .agent then "/gate-run " + .skill + " (独立コンテキスト・ペルソナ: " + .agent + ")"
+     else "/" + .skill end) +
     (if .optional then " (optional)" else "" end) +
     (if .output then " → 成果物: " + .output else "" end) +
     (if .personas then " (ペルソナ: " + (.personas | join(", ")) + ")" else "" end)

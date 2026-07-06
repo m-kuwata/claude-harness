@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
-"""harness_map.py — lock.json とセッション状態から読み取り専用ビジュアライザ (markdown) を生成する。
+"""harness_map.py — lock.json とセッション状態・進捗ログから読み取り専用ビジュアライザ (markdown) を生成する。
 
-Usage: harness_map.py <lock.json> <state_dir> > harness-map.md
+Usage: harness_map.py <lock.json> <state_dir> <root>
 """
 import glob
 import json
 import os
 import sys
 from datetime import datetime
+
+STATUS_MARK = {
+    "passed": "✓",
+    "skipped": "⏭",
+    "breaker_open": "⚠",
+    "verify_failed": "✗",
+}
 
 
 def esc(s):
@@ -25,7 +32,7 @@ def workflow_mermaid(name, wf):
     for g in entry + gates:
         idx += 1
         nid = f"G{idx}"
-        label = "/" + g["skill"]
+        label = ("/gate-run " + g["skill"]) if g.get("agent") else ("/" + g["skill"])
         badges = []
         if g in entry:
             badges.append("entry")
@@ -33,8 +40,12 @@ def workflow_mermaid(name, wf):
             badges.append(f"{g['when']} 変更時")
         if g.get("optional"):
             badges.append("optional")
+        if g.get("agent"):
+            badges.append("👤 独立コンテキスト: " + g["agent"])
         if g.get("personas"):
             badges.append("👥 " + "+".join(g["personas"]))
+        if g.get("verify"):
+            badges.append("✓ verify あり")
         if g.get("output"):
             badges.append("→ " + g["output"])
         if badges:
@@ -51,6 +62,7 @@ def workflow_mermaid(name, wf):
 
 def main():
     lock_path, state_dir = sys.argv[1], sys.argv[2]
+    root = sys.argv[3] if len(sys.argv) > 3 else None
     with open(lock_path) as f:
         lock = json.load(f)
     meta = lock["meta"]
@@ -123,12 +135,40 @@ def main():
             except (json.JSONDecodeError, OSError):
                 continue
             gates = st.get("gates") or {}
-            done = ", ".join(f"{g}✓" for g, v in gates.items()
-                             if v.get("status") in ("passed", "skipped")) or "—"
+            done = ", ".join(
+                f"{g}{STATUS_MARK.get(v.get('status'), '?')}" for g, v in gates.items()
+            ) or "—"
             pend = (st.get("pending_token") or {}).get("gate")
             prog = done + (f" → **{pend}** (待ち)" if pend else "")
             out.append(f"| `{st.get('session_id', '?')[:16]}` | {st.get('workflow') or '未宣言'} "
                        f"| {st.get('ticket') or '—'} | {prog} |")
+
+    # ---- 進捗ログ（セッションをまたいで残る。長時間・複数セッションのループの追跡用） ----
+    out.append("")
+    out.append("## 最近の進捗（セッションをまたいで永続。.claude-harness/progress.log）")
+    out.append("")
+    log_path = os.path.join(root, ".claude-harness", "progress.log") if root else None
+    entries = []
+    if log_path and os.path.exists(log_path):
+        with open(log_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    if not entries:
+        out.append("（まだ記録がない。/flow の宣言やゲート通過があると記録される）")
+    else:
+        out.append("| 時刻 | セッション | イベント | 詳細 |")
+        out.append("|---|---|---|---|")
+        for e in entries[-20:]:
+            out.append(
+                f"| {e.get('ts', '')} | `{e.get('session_id', '?')[:12]}` "
+                f"| {e.get('event', '')} | {e.get('detail', '')} |"
+            )
 
     print("\n".join(out))
 

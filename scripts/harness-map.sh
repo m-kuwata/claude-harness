@@ -15,5 +15,5 @@ project=$(jq -r '.project.name' "$lock")
 state_dir="$STATE_ROOT/$project"
 mkdir -p "$(dirname "$out")" "$state_dir"
 
-python3 "$(dirname "${BASH_SOURCE[0]}")/harness_map.py" "$lock" "$state_dir" > "$out"
+python3 "$(dirname "${BASH_SOURCE[0]}")/harness_map.py" "$lock" "$state_dir" "$root" > "$out"
 echo "✓ 生成しました: $out"
