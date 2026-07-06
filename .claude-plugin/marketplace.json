@@ -1,5 +1,6 @@
 {
   "name": "m-kuwata",
+  "description": "ハーネスエンジニアリングのフレームワーク。宣言的 harness.yaml でワークフローゲート・ペルソナレビュー・CI/チケットアダプタを配布する",
   "owner": {
     "name": "m-kuwata"
   },
