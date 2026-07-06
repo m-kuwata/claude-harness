@@ -167,7 +167,8 @@
           "skill": { "type": "string", "description": "ゲートスキル名（/なし）" },
           "when": { "type": "string", "description": "この paths クラスが dirty のときのみ要求" },
           "optional": { "type": "boolean", "description": "--skip \"<理由>\" でスキップ通過可" },
-          "output": { "type": "string", "description": "成果物パス。{date} {slug} プレースホルダ可。存在すれば自動通過" },
+          "output": { "type": "string", "description": "成果物パス。{date} {slug} プレースホルダ可。存在すれば自動通過（トークン不要）" },
+          "verify": { "type": "string", "description": "mark-gate-passed の完了申告を受理する前にプロジェクトルートで実行するシェルコマンド。exit 0 で受理、非0で再ブロック（同じトークンで再提出可）。自己申告だけでなく検証可能なアウトプットを要求したいゲートに使う（例: scripts/verify-approved.sh）" },
           "personas": { "type": "array", "items": { "type": "string" }, "description": "review-board が起動するペルソナ名" },
           "min_diff_lines": { "type": "number", "description": "diff がこの行数未満ならスキップ（コスト制御）" },
           "target": { "enum": ["branch", "pr"], "description": "review-board の diff 取得元" }

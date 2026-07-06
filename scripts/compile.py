@@ -155,6 +155,8 @@ def main():
                 err(f"workflows.{name}: gates[].skill は必須です")
             if g.get("when") and g["when"] not in paths:
                 err(f"workflows.{name}.gates[{g.get('skill')}]: 未定義の paths クラス '{g['when']}'")
+            if "verify" in g and not isinstance(g["verify"], str):
+                err(f"workflows.{name}.gates[{g.get('skill')}]: verify は文字列（シェルコマンド）である必要があります")
             for p in g.get("personas") or []:
                 if p not in personas:
                     err(f"workflows.{name}.gates[{g.get('skill')}]: 未定義のペルソナ '{p}'")

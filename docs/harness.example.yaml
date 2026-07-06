@@ -59,6 +59,12 @@ workflows:
       - skill: review-board
         when: impl
         personas: [qa, po]
+        # verify: トークンの自己申告だけでなく、review-board が書き出す
+        # .claude-harness/review-findings.json の all_approved を機械的に確認する。
+        # 未設定でも動く（後方互換）が、レビュー系ゲートには設定を推奨。
+        # ${HARNESS_PLUGIN_ROOT} はエンジンが verify/run コマンド実行時に必ず
+        # export する変数（${CLAUDE_PLUGIN_ROOT} とは別物。lib.sh 参照）。
+        verify: "bash ${HARNESS_PLUGIN_ROOT}/scripts/verify-approved.sh .claude-harness/review-findings.json"
       - skill: design-check
         when: screen
         optional: true

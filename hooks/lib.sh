@@ -2,9 +2,17 @@
 # lib.sh — エンジン共有関数。全フック・スクリプトが source する。
 # 依存: jq(必須), yq または python3+PyYAML(コンパイル時), python3(コンパイル時)
 
-HARNESS_ENGINE_VERSION="0.3.0"
+HARNESS_ENGINE_VERSION="0.4.0"
 STATE_ROOT="${HARNESS_STATE_DIR:-/tmp/claude-harness}"
 LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# harness.yaml に書かれた run:/verify:/inventory: コマンドをエンジンが eval する際に
+# 使える、プラグインルートへの確実な参照。Claude Code の ${CLAUDE_PLUGIN_ROOT} は
+# hooks.json 等 Claude Code 自身が解釈するフィールド専用のテキスト置換であり、
+# このスクリプトが eval する任意コマンド内で環境変数として展開される保証がない
+# （実地未検証）。harness.yaml 側で確実に使えるのはこの変数。
+HARNESS_PLUGIN_ROOT="$(cd "$LIB_DIR/.." && pwd)"
+export HARNESS_PLUGIN_ROOT
 
 # ---- プロジェクトルート解決 -------------------------------------
 # フック stdin の cwd → CLAUDE_PROJECT_DIR → pwd の順

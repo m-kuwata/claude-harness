@@ -31,8 +31,13 @@ check_gates_for_root() {
   local workflow; workflow=$(jq -r '.workflow // empty' "$sp")
   [ -z "$workflow" ] && return 2   # フロー未宣言 = 編集もブロック済み = 強制対象なし
 
-  # 保留トークンのマーカーを回収して状態へ反映
-  local token gate marker status reason tmp
+  # 保留トークンのマーカーを回収して状態へ反映。
+  # gates[].verify（シェルコマンド）が定義されている場合、"passed" 申告は
+  # トークン一致だけでなく verify の exit 0 を確認できて初めて受理する
+  # （自己申告だけで通す旧来の仕様への「検証可能なアウトプット」の強制）。
+  # verify 失敗時は pending_token を維持する（トークンを再利用させ、
+  # サーキットブレーカーの連続ブロック回数カウンタも継続させるため）。
+  local token gate marker tmp
   token=$(jq -r '.pending_token.token // empty' "$sp")
   gate=$(jq -r '.pending_token.gate // empty' "$sp")
   if [ -n "$token" ]; then
@@ -40,14 +45,35 @@ check_gates_for_root() {
     if [ -f "$marker" ]; then
       if [ "$(jq -r '.gate // empty' "$marker")" = "$gate" ]; then
         if [ "$(jq -r '.skipped // false' "$marker")" = "true" ]; then
-          status="skipped"; reason=$(jq -r '.reason // ""' "$marker")
+          local reason; reason=$(jq -r '.reason // ""' "$marker")
+          tmp=$(mktemp)
+          jq --arg g "$gate" --arg r "$reason" \
+            '.gates[$g] = {status:"skipped", reason:$r, at:(now|todate)} | .pending_token = null' \
+            "$sp" > "$tmp" && mv "$tmp" "$sp"
         else
-          status="passed"; reason=""
+          local verify_cmd
+          verify_cmd=$(jq -r --arg w "$workflow" --arg g "$gate" \
+            '((.workflows[$w].entry.gates // []) + (.workflows[$w].gates // [])) | .[] | select(.skill == $g) | .verify // empty' "$lock")
+          if [ -n "$verify_cmd" ]; then
+            local vout vrc
+            vout=$( (cd "$root" && eval "$verify_cmd") 2>&1 ); vrc=$?
+            if [ "$vrc" -eq 0 ]; then
+              tmp=$(mktemp)
+              jq --arg g "$gate" '.gates[$g] = {status:"passed", at:(now|todate)} | .pending_token = null' \
+                "$sp" > "$tmp" && mv "$tmp" "$sp"
+            else
+              local detail; detail=$(echo "$vout" | tail -n 15)
+              tmp=$(mktemp)
+              jq --arg g "$gate" --arg d "$detail" \
+                '.gates[$g] = {status:"verify_failed", detail:$d, at:(now|todate)}' \
+                "$sp" > "$tmp" && mv "$tmp" "$sp"
+            fi
+          else
+            tmp=$(mktemp)
+            jq --arg g "$gate" '.gates[$g] = {status:"passed", at:(now|todate)} | .pending_token = null' \
+              "$sp" > "$tmp" && mv "$tmp" "$sp"
+          fi
         fi
-        tmp=$(mktemp)
-        jq --arg g "$gate" --arg s "$status" --arg r "$reason" \
-          '.gates[$g] = {status:$s, reason:$r, at:(now|todate)} | .pending_token = null' \
-          "$sp" > "$tmp" && mv "$tmp" "$sp"
       fi
       rm -f "$marker"
     fi
@@ -62,7 +88,7 @@ check_gates_for_root() {
 
   while IFS= read -r g; do
     [ -z "$g" ] && continue
-    local skill when optional output
+    local skill when optional output status
     skill=$(echo "$g" | jq -r '.skill')
     when=$(echo "$g" | jq -r '.when // empty')
     optional=$(echo "$g" | jq -r '.optional // false')
@@ -113,12 +139,21 @@ check_gates_for_root() {
     fi
 
     local plugin_root; plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-    local msg="harness ゲート [$project / $workflow]: /$skill が未完了です。"
-    if [ -n "$output" ]; then
-      msg+=" 成果物 '$output' を作成してください（存在すれば自動通過します）。"
+    local msg
+    if [ "$status" = "verify_failed" ]; then
+      local detail; detail=$(jq -r --arg g "$skill" '.gates[$g].detail // empty' "$sp")
+      msg="harness ゲート [$project / $workflow]: /$skill の完了報告を検証しましたが、条件を満たしていませんでした。"
+      [ -n "$detail" ] && msg+=$'\n'"検証コマンドの出力:"$'\n'"$detail"
+      msg+=$'\n'"問題を修正してから同じコマンドを再実行してください: \`bash $plugin_root/scripts/mark-gate-passed.sh $skill $gtoken\`"
+      [ "$optional" = "true" ] && msg+=" このゲートは optional です。対象外と判断した場合は \`bash $plugin_root/scripts/mark-gate-passed.sh $skill $gtoken --skip \"<理由>\"\` でスキップできます（verify は迂回されます）。"
     else
-      msg+=" /$skill を完了してから \`bash $plugin_root/scripts/mark-gate-passed.sh $skill $gtoken\` を実行してください。"
-      [ "$optional" = "true" ] && msg+=" このゲートは optional です。対象外と判断した場合は \`bash $plugin_root/scripts/mark-gate-passed.sh $skill $gtoken --skip \"<理由>\"\` でスキップできます。"
+      msg="harness ゲート [$project / $workflow]: /$skill が未完了です。"
+      if [ -n "$output" ]; then
+        msg+=" 成果物 '$output' を作成してください（存在すれば自動通過します）。"
+      else
+        msg+=" /$skill を完了してから \`bash $plugin_root/scripts/mark-gate-passed.sh $skill $gtoken\` を実行してください。"
+        [ "$optional" = "true" ] && msg+=" このゲートは optional です。対象外と判断した場合は \`bash $plugin_root/scripts/mark-gate-passed.sh $skill $gtoken --skip \"<理由>\"\` でスキップできます。"
+      fi
     fi
     msg+=" トークンなしの記録・touch による偽装は無効です。"
     block "$msg"

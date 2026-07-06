@@ -315,3 +315,5 @@ session_id は全フックイベントの stdin JSON から取得する。
 | 6 | takt 連携 | harness.yaml → takt YAML の変換は v1 以降。一次ソースは本スキーマ |
 | 7 | JSON Schema の提供 | v0 スキーマ確定と同時に `schemas/harness.schema.json` を同梱し yaml-language-server で補完・検証 |
 | 8 | プラグイン名・マーケットプレイス配置 | 仮称 `claude-harness`。マーケットプレイスはこのリポジトリを転用するか新設するか未定 |
+| 9 | ゲート完了の検証強度 | v0.4.0 で `gates[].verify` を追加。未設定ならトークンのみの自己申告（弱）、設定すればエンジンが exit code で機械検証（強）。デフォルトは自己申告のまま（後方互換優先）。将来 review 系ゲートは `verify` 必須にするか検討 |
+| 10 | `${CLAUDE_PLUGIN_ROOT}` が eval される任意コマンド内で実環境変数として使えるか | 未検証（プラグイン実地インストールが未実施のため）。安全側に倒し、harness.yaml の `run:`/`verify:`/`inventory:` 用にエンジン自身が `HARNESS_PLUGIN_ROOT` を export して代替。実地検証（論点 issue に別記の hooks.json 実セッション検証）で解消され次第、統合を再検討 |
