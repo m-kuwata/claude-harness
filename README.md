@@ -74,7 +74,16 @@ claude-harness/
 
 ## ステータス
 
-**エンジン + 全スキル実装済み（v0.2.0）**。E2E スモークテスト 37 件通過（`bash tests/run.sh`）。pokotto-box / classly / ehon-note でパイロット導入済み。
+**エンジン + 全スキル実装済み（v0.3.0）**。E2E スモークテスト 51 件通過（`bash tests/run.sh`）。pokotto-box / classly / ehon-note でパイロット導入済み。
+
+**v0.3.0 での修正**: ユーザースコープ（`~/.claude/settings.json`）でインストールした場合、
+セッションの起動ディレクトリ（`cwd`）が複数リポジトリの親ディレクトリになるケース
+（例: `~/projects/` から起動し、配下の複数リポジトリを同一セッションで横断する）で、
+プロジェクトルート解決が cwd に依存していたためエンジンが一切発火しない回帰バグを修正。
+現在はルート解決を編集対象ファイル自身の場所ベースに変更し、セッションが実際に触れた
+全プロジェクトを registry で追跡する。あわせて `guards.reuse` / `ci.on_edit` /
+`ci.on_commit.when_staged` が POSIX 非互換の `grep -E` に依存していた箇所を
+jq(Oniguruma) ベースの照合に統一（`(?:...)` 構文は GNU grep 依存で移植性がなかった）。
 
 ### エンジンの依存
 
@@ -89,7 +98,7 @@ claude-harness/
 - [x] スキル6本（/flow・/harness-init・/review-board・/harness-map・/config-audit・/report）
 - [x] 汎用ペルソナ agents（qa / po / architect / security）
 - [x] harness.schema.json（yaml-language-server 用）
-- [x] E2E スモークテスト（tests/run.sh・37 件）
+- [x] E2E スモークテスト（tests/run.sh・51 件）
 - [x] パイロット移行: pokotto-box / classly / ehon-note
 - [ ] hooks.json のプラグイン実地検証（実セッションでのフック発火）
 

@@ -55,8 +55,17 @@ tickets:
   provider: none
   exempt: [exempt, test]
 ci:
+  on_edit:
+    - paths: ["src/**/*.ts"]
+      run: "echo linted:{file} >> .lint.log"
   on_commit:
     - run: "test -f .ci-ok"
+    - when_staged: ["src/solver/**"]
+      run: "test -f .solver-ci-ok"
+guards:
+  reuse:
+    - on_create: "src/**/new-widget.ts"
+      inventory: "ls src"
 workflows:
   implement:
     default: true
@@ -101,6 +110,28 @@ out=$(bash "$PLUGIN/scripts/flow-start.sh" implement 2>&1)
 assert_contains "ゲート計画を提示" "/refactor" "$out"
 out=$(ev Edit "$ROOT/src/main.ts" | hook pre-tool-dispatch.sh)
 assert_empty "宣言後は impl 編集可" x "$out"
+
+echo "== 4b. compile.py の (?:...) 正規表現を grep ではなく jq test() で照合する経路 =="
+# glob の ** は compile.py で (?:.*/)? のような jq/Oniguruma 専用構文にコンパイルされる。
+# POSIX grep -E はこれを解釈できず、GNU grep のみ警告付きでたまたま動くという移植性のない
+# 状態だったため、grep 不使用（re_test 経由）に修正した経路を実地で検証する。
+out=$(ev Write "$ROOT/src/new-widget.ts" 2>&1 | hook pre-tool-dispatch.sh 2>&1)
+assert_contains "guards.reuse: (?:...) パターンでも新規作成が検知される" "additionalContext" "$out"
+
+rm -f "$ROOT/.lint.log"
+ev Edit "$ROOT/src/main.ts" | hook post-tool-dispatch.sh 2>/dev/null >/dev/null
+t "ci.on_edit: (?:...) パターンでも on_edit コマンドが実行される" test -f "$ROOT/.lint.log"
+
+mkdir -p "$ROOT/src/solver"
+echo x > "$ROOT/src/solver/core.ts"
+git -C "$ROOT" add -A
+out=$(ev Bash "" "git commit -m test" | hook pre-tool-dispatch.sh)
+assert_contains "ci.on_commit.when_staged: (?:...) パターンでも staged 判定が効きコマンド未整備で deny" '"deny"' "$out"
+touch "$ROOT/.solver-ci-ok" "$ROOT/.ci-ok"   # 無条件ルールも一時的に満たす（section 9 の前提を壊さないよう後で消す）
+out=$(ev Bash "" "git commit -m test" | hook pre-tool-dispatch.sh)
+assert_empty "when_staged 条件のコマンドが成功すれば commit 許可" x "$out"
+git -C "$ROOT" reset -q
+rm -f "$ROOT/.ci-ok" "$ROOT/.solver-ci-ok"
 
 echo "== 5. dirty 追跡 + シーケンサー =="
 echo "x" > "$ROOT/src/main.ts"
@@ -204,6 +235,77 @@ fi
 echo "== 14. SessionEnd =="
 ev "" | hook session-end.sh
 t "状態ファイルが削除される" test ! -f "$HARNESS_STATE_DIR/testproj/$SID.json"
+
+# ============================================================
+# 15. マルチリポジトリセッション
+#   cwd が「複数リポジトリを含む親ディレクトリ」であるケース
+#   （例: ユーザースコープでプラグインを入れ、~/projects/ のような
+#   親ディレクトリからセッションを開始し、その配下の複数リポジトリを
+#   同一セッションで横断する）。
+#   ルート解決を cwd 依存にすると、この構成でエンジンが一切発火しない
+#   回帰バグがあったため、ファイル単位のルート解決 + セッション内
+#   registry で正しく動くことを検証する。
+# ============================================================
+echo "== 15. マルチリポジトリセッション（cwd が複数repoの親） =="
+PARENT="$TMP/multi"
+REPO_A="$PARENT/repo-a"; REPO_B="$PARENT/repo-b"
+mkdir -p "$REPO_A/.claude/src" "$REPO_B/.claude/src" "$REPO_A/src" "$REPO_B/src"
+for R in "$REPO_A" "$REPO_B"; do
+  git -C "$R" init -q -b main
+  git -C "$R" config user.email t@t; git -C "$R" config user.name t
+done
+cat > "$REPO_A/.claude/harness.yaml" <<'EOF'
+version: 0
+project: { name: repoa }
+paths:
+  impl: { include: ["src/**/*.ts"] }
+workflows:
+  implement: { default: true, gates: [ { skill: refactor, when: impl } ] }
+EOF
+cp "$REPO_A/.claude/harness.yaml" "$REPO_B/.claude/harness.yaml"
+sed -i 's/repoa/repob/' "$REPO_B/.claude/harness.yaml"
+git -C "$REPO_A" add -A && git -C "$REPO_A" commit -qm init >/dev/null
+git -C "$REPO_B" add -A && git -C "$REPO_B" commit -qm init >/dev/null
+
+MULTI_SID="sess-multi-1"
+export CLAUDE_SESSION_ID="$MULTI_SID"
+evc() { # $1=cwd $2=tool $3=file
+  jq -n --arg sid "$MULTI_SID" --arg cwd "$1" --arg tool "$2" --arg f "$3" \
+    '{session_id:$sid, cwd:$cwd, tool_name:$tool, tool_input:{file_path:$f}}'
+}
+
+# PARENT 自体は git リポジトリではない（複数リポジトリの単なる置き場）
+git -C "$PARENT" rev-parse --show-toplevel >/dev/null 2>&1 && echo "  警告: PARENT が git repo になっている(テスト前提が崩れている)"
+
+out=$(evc "$PARENT" Edit "$REPO_A/src/foo.ts" | hook pre-tool-dispatch.sh)
+assert_contains "cwdが共有親でも repo-a の harness が発火して deny" '"deny"' "$out"
+
+(cd "$REPO_A" && bash "$PLUGIN/scripts/flow-start.sh" implement >/dev/null 2>&1)
+
+out=$(evc "$PARENT" Edit "$REPO_A/src/foo.ts" | hook pre-tool-dispatch.sh)
+assert_empty "repo-a で flow 宣言後は cwd が親でも編集可" x "$out"
+
+out=$(evc "$PARENT" Edit "$REPO_B/src/bar.ts" | hook pre-tool-dispatch.sh)
+assert_contains "repo-b は別プロジェクトとして未宣言のまま(cwdが親でも正しく分離)" '"deny"' "$out"
+
+echo "x" > "$REPO_A/src/foo.ts"
+evc "$PARENT" Edit "$REPO_A/src/foo.ts" | hook post-tool-dispatch.sh >/dev/null
+t "repo-a の dirty.impl が正しいプロジェクト配下に記録される" \
+  jq -e '.dirty.impl == true' "$HARNESS_STATE_DIR/repoa/$MULTI_SID.json"
+
+out=$(evc "$PARENT" "" "" | hook stop-sequencer.sh)
+assert_contains "cwdが親のままでも Stop が repo-a の未通過ゲートを検知する" "/refactor" "$out"
+
+token=$(jq -r '.pending_token.token' "$HARNESS_STATE_DIR/repoa/$MULTI_SID.json")
+bash "$PLUGIN/scripts/mark-gate-passed.sh" refactor "$token" >/dev/null
+out=$(evc "$PARENT" "" "" | hook stop-sequencer.sh)
+assert_empty "repo-a のゲート通過後は(repo-bは未dirtyのため)Stopが素通し" x "$out"
+
+evc "$PARENT" "" "" | hook session-end.sh
+t "SessionEnd で repo-a の状態も掃除される（registry 経由）" \
+  test ! -f "$HARNESS_STATE_DIR/repoa/$MULTI_SID.json"
+
+export CLAUDE_SESSION_ID="$SID"
 
 echo ""
 echo "結果: PASS=$PASS FAIL=$FAIL"

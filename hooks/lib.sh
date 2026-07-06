@@ -2,7 +2,7 @@
 # lib.sh — エンジン共有関数。全フック・スクリプトが source する。
 # 依存: jq(必須), yq または python3+PyYAML(コンパイル時), python3(コンパイル時)
 
-HARNESS_ENGINE_VERSION="0.2.1"
+HARNESS_ENGINE_VERSION="0.3.0"
 STATE_ROOT="${HARNESS_STATE_DIR:-/tmp/claude-harness}"
 LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -19,6 +19,18 @@ resolve_root() {
     root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
   fi
   echo "$root"
+}
+
+# 編集対象ファイル自身の場所から git top-level を解決する。
+# セッションの cwd に依存しないため、cwd が複数リポジトリの親ディレクトリ
+# （例: マルチリポジトリセッションの起動ディレクトリ）であっても正しく動く。
+# 見つからなければ空を返す（呼び出し側は resolve_root(cwd) にフォールバックすること）。
+find_root_for_file() {
+  local file="$1" dir
+  dir=$(dirname -- "$file")
+  while [ ! -d "$dir" ] && [ "$dir" != "/" ]; do dir=$(dirname -- "$dir"); done
+  [ -d "$dir" ] || return 1
+  (cd "$dir" && git rev-parse --show-toplevel 2>/dev/null)
 }
 
 project_hash() { echo -n "$1" | md5sum | cut -c1-12; }
@@ -122,6 +134,15 @@ classify_file() {
     .key' "$lock" 2>/dev/null
 }
 
+# compile.py が生成する正規表現（jq/Oniguruma の (?:...) 非捕捉グループ構文）を
+# 文字列に対してテストする。POSIX grep -E は (?:...) を解釈できず、GNU grep は
+# 警告付きでたまたま動くように見えるだけで移植性がない。compile.py 由来の
+# 正規表現を扱うときは grep ではなく必ずこれを使うこと。
+re_test() { # $1=対象文字列 $2=正規表現
+  [ -z "$2" ] && return 1
+  [ "$(jq -n --arg s "$1" --arg p "$2" '$s | test($p)' 2>/dev/null)" = "true" ]
+}
+
 # 絶対パスをルート相対に。ルート外なら空
 rel_path() { # $1=root $2=path
   local p="$2"
@@ -140,6 +161,25 @@ extract_files() { # stdin JSON 全体を $1 に受ける
 }
 
 new_token() { head -c16 /dev/urandom | md5sum | cut -c1-16; }
+
+# ---- セッション内マルチプロジェクト registry ----------------------
+# 1セッションが複数の harness 導入済みリポジトリを横断して触ることがある
+# （例: cwd が複数リポジトリの親ディレクトリのマルチリポジトリセッション）。
+# Stop / SessionEnd は cwd 由来の単一 root だけでなく、このセッションが
+# 実際に触れた全プロジェクトを把握する必要があるため、ここに記録する。
+session_registry_path() { echo "$STATE_ROOT/_sessions/$1/roots"; }
+
+register_session_root() { # $1=session_id $2=root
+  if [ -z "$1" ] || [ -z "$2" ]; then return 0; fi
+  local f; f=$(session_registry_path "$1")
+  mkdir -p "$(dirname "$f")"
+  grep -qxF -- "$2" "$f" 2>/dev/null || echo "$2" >> "$f"
+}
+
+session_known_roots() { # $1=session_id
+  local f; f=$(session_registry_path "$1")
+  [ -f "$f" ] && cat "$f"
+}
 
 # 24h 超の状態・マーカー・PIDマップを掃除
 gc_state() {

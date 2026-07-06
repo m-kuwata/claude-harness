@@ -58,6 +58,7 @@ done
 if [ -n "$session_id" ]; then
   sp=$(state_path "$lock" "$session_id")
   init_state "$sp" "$session_id"
+  register_session_root "$session_id" "$root"
 fi
 project=$(jq -r '.project.name' "$lock")
 flows=$(jq -r '[.workflows | to_entries[] | .key + (if .value.default then "*" else "" end)] | join(", ")' "$lock")
