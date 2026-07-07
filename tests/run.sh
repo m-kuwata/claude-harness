@@ -363,6 +363,12 @@ assert_contains "却下(approved:false)なら verify-approved.sh が再ブロッ
 prtoken2=$(jq -r '.pending_token.token' "$HARNESS_STATE_DIR/testproj/$PSID.json")
 t "却下後もトークンは同じ（計画を直して同じトークンで再提出するループになる）" test "$prtoken" = "$prtoken2"
 
+echo "== 6i. プランナーの再起動（reads の逆引きで却下フィードバックを自動検出） =="
+replan_prep=$(bash "$PLUGIN/scripts/gate-run-prep.sh" plan 2>/dev/null)
+assert_contains "却下している plan-review を revision_from として自動検出する" "plan-review" "$(jq -r '.revision_from' <<<"$replan_prep")"
+assert_contains "却下時の feedback が revision_feedback に自動的に入る（手動再構成不要）" "スコープ外が薄い" "$(jq -r '.revision_feedback' <<<"$replan_prep")"
+assert_contains "却下時の concerns も含まれる" "スコープ外の具体性不足" "$(jq -r '.revision_feedback' <<<"$replan_prep")"
+
 # プランナー役が計画を修正 → レビュアー役が承認（approved:true）に変えて再提出
 printf '# 実装計画\n\n## スコープ\nダミー計画の本文（改訂）\n\n## スコープ外\n具体的に明記した\n\n## リスク\nダミー\n' > "$ROOT/$artifact"
 echo '{"approved": true, "feedback": "スコープ外が明確になった", "concerns": []}' > "$ROOT/$rartifact"
@@ -370,6 +376,10 @@ bash "$PLUGIN/scripts/mark-gate-passed.sh" plan-review "$prtoken" >/dev/null
 out=$(jq -n --arg sid "$PSID" --arg cwd "$ROOT" '{session_id:$sid, cwd:$cwd, tool_name:"", tool_input:{}}' | hook stop-sequencer.sh)
 assert_empty "承認(approved:true)されれば全 entry ゲート通過（ループの出口）" x "$out"
 t "gates.plan-review が passed になる" jq -e '.gates["plan-review"].status == "passed"' "$HARNESS_STATE_DIR/testproj/$PSID.json"
+
+replan_prep2=$(bash "$PLUGIN/scripts/gate-run-prep.sh" plan 2>/dev/null)
+t "承認後は revision_from が再検出されない（最新状態を都度参照している）" \
+  test "$(jq -r '.revision_from' <<<"$replan_prep2")" = ""
 
 rm -rf "$ROOT/.claude-harness/$PSID"
 export CLAUDE_SESSION_ID="$SID"

@@ -73,6 +73,32 @@ if [ -n "$reads_skill" ]; then
   fi
 fi
 
+# 改訂検出（reads: の逆引き）: このゲートを reads している別ゲート（レビューゲート）
+# が「却下」判定を出している場合、その feedback を自動的にバンドルへ含める。
+# これにより「プランナーを再起動して改訂させる」際、Claude が却下理由を手動で
+# 再構成しなくても、gate-run-prep.sh <生成系スキル> を再実行するだけで
+# レビュアーの指摘を引き継いだ状態でサブエージェントを起動できる。
+revision_from=""
+revision_feedback=""
+reviewer_skill=$(jq -r --arg w "$workflow" --arg s "$skill" \
+  '((.workflows[$w].entry.gates // []) + (.workflows[$w].gates // []))[] | select(.reads == $s) | .skill' "$lock" | head -1)
+if [ -n "$reviewer_skill" ]; then
+  reviewer_path=$(gate_artifact_path "$root" "$sid" "$reviewer_skill" "report.md")
+  if [ -f "$root/$reviewer_path" ]; then
+    # jq の // は false を偽値として扱いフォールバックしてしまうため、
+    # 明示的な != null 判定を使う（承認拒否＝false を正しく拾うため）
+    approved=$(jq -r '
+      if (.all_approved != null) then (.all_approved | tostring)
+      elif (.approved != null) then (.approved | tostring)
+      else "" end
+    ' "$root/$reviewer_path" 2>/dev/null)
+    if [ "$approved" = "false" ]; then
+      revision_from="$reviewer_skill"
+      revision_feedback=$(cat "$root/$reviewer_path")
+    fi
+  fi
+fi
+
 jq -n \
   --arg root "$root" \
   --arg skill "$skill" \
@@ -84,6 +110,8 @@ jq -n \
   --arg artifact "$artifact_path" \
   --arg reads_skill "$reads_skill" \
   --arg reads_content "$reads_content" \
+  --arg revision_from "$revision_from" \
+  --arg revision_feedback "$revision_feedback" \
   '{
     root: $root,
     skill: $skill,
@@ -94,5 +122,7 @@ jq -n \
     ticket_body: $ticket_body,
     artifact_path: $artifact,
     reads_skill: $reads_skill,
-    reads_content: $reads_content
+    reads_content: $reads_content,
+    revision_from: $revision_from,
+    revision_feedback: $revision_feedback
   }'
