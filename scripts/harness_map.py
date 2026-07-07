@@ -42,6 +42,8 @@ def workflow_mermaid(name, wf):
             badges.append("optional")
         if g.get("agent"):
             badges.append("👤 独立コンテキスト: " + g["agent"])
+        if g.get("reads"):
+            badges.append("📖 reads: " + g["reads"])
         if g.get("personas"):
             badges.append("👥 " + "+".join(g["personas"]))
         if g.get("verify"):

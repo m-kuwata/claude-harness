@@ -71,12 +71,14 @@ echo "ゲート計画（Stop フックがこの順に要求します）:"
 jq -r --arg w "$workflow" '
   ((.workflows[$w].entry.gates // []) | map(
     "  [entry] " + (if .agent then "/gate-run " + .skill + " (独立コンテキスト・ペルソナ: " + .agent + ")"
-                    else "/" + .skill end)
+                    else "/" + .skill end) +
+    (if .reads then " ← " + .reads + " の成果物を参照" else "" end)
   )) +
   ((.workflows[$w].gates // []) | map(
     "  " + (if .when then "[" + .when + " 変更時] " else "" end) +
     (if .agent then "/gate-run " + .skill + " (独立コンテキスト・ペルソナ: " + .agent + ")"
      else "/" + .skill end) +
+    (if .reads then " ← " + .reads + " の成果物を参照" else "" end) +
     (if .optional then " (optional)" else "" end) +
     (if .output then " → 成果物: " + .output else "" end) +
     (if .personas then " (ペルソナ: " + (.personas | join(", ")) + ")" else "" end)

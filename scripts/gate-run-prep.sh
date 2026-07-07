@@ -60,6 +60,19 @@ fi
 
 artifact_path=$(gate_artifact_path "$root" "$sid" "$skill" "report.md")
 
+# reads: 他ゲートの成果物を独立にレビューする類のゲート（例: plan-review が
+# plan を reads する）向け。参照先ゲートのアーティファクト内容を渡す。
+reads_skill=$(echo "$gate" | jq -r '.reads // empty')
+reads_content=""
+if [ -n "$reads_skill" ]; then
+  reads_path=$(gate_artifact_path "$root" "$sid" "$reads_skill" "report.md")
+  if [ -f "$root/$reads_path" ]; then
+    reads_content=$(cat "$root/$reads_path")
+  else
+    echo "⚠ reads 先 '$reads_skill' の成果物 ($reads_path) がまだありません。先に /gate-run $reads_skill を完了させてください。" >&2
+  fi
+fi
+
 jq -n \
   --arg root "$root" \
   --arg skill "$skill" \
@@ -69,6 +82,8 @@ jq -n \
   --arg ticket "$ticket" \
   --arg ticket_body "$ticket_body" \
   --arg artifact "$artifact_path" \
+  --arg reads_skill "$reads_skill" \
+  --arg reads_content "$reads_content" \
   '{
     root: $root,
     skill: $skill,
@@ -77,5 +92,7 @@ jq -n \
     diff_file: $diff_file,
     ticket: $ticket,
     ticket_body: $ticket_body,
-    artifact_path: $artifact
+    artifact_path: $artifact,
+    reads_skill: $reads_skill,
+    reads_content: $reads_content
   }'

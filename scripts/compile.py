@@ -150,6 +150,7 @@ def main():
         w["permissions"] = perm
         gates = w.get("gates") or []
         entry = (w.get("entry") or {}).get("gates") or []
+        all_gate_skills = {g.get("skill") for g in entry + gates if g.get("skill")}
         for g in entry + gates:
             if not g.get("skill"):
                 err(f"workflows.{name}: gates[].skill は必須です")
@@ -162,6 +163,8 @@ def main():
                     err(f"workflows.{name}.gates[{g.get('skill')}]: 未定義のペルソナ '{p}'")
             if g.get("agent") and g["agent"] not in personas:
                 err(f"workflows.{name}.gates[{g.get('skill')}]: 未定義のペルソナ '{g['agent']}'（agent は personas 内の名前を指定する）")
+            if g.get("reads") and g["reads"] not in all_gate_skills:
+                err(f"workflows.{name}.gates[{g.get('skill')}]: reads が指す gate '{g['reads']}' がこのワークフローに存在しない")
         workflows[name] = w
 
     if errors:

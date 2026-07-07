@@ -38,6 +38,9 @@ personas:
   planner:
     agent: harness:planner
     context: [CLAUDE.md, docs/architecture.md]
+  plan_reviewer:
+    agent: harness:plan-reviewer
+    context: [CLAUDE.md, docs/architecture.md]
   qa:
     agent: harness:qa-reviewer
     context: [CLAUDE.md]
@@ -63,6 +66,17 @@ workflows:
         - skill: plan
           agent: planner
           verify: "bash ${HARNESS_PLUGIN_ROOT}/scripts/verify-plan.sh .claude-harness/{session_id}/plan/report.md"
+        # plan-review: plan とは別の独立コンテキストで計画をレビューする
+        # （Sprint contracts の完全形。Generator の自己評価バイアスを避けるため
+        # プランナー自身には自分の計画を評価させない）。reads: plan で plan
+        # ゲートの成果物を読み込む。却下（approved:false）されると verify が
+        # 失敗して同じトークンで再ブロックされる — プランナーに計画を直させ
+        # （.claude-harness/{session_id}/plan/report.md を直接更新）、
+        # 再度 /gate-run plan-review でレビューし直す、というループになる。
+        - skill: plan-review
+          agent: plan_reviewer
+          reads: plan
+          verify: "bash ${HARNESS_PLUGIN_ROOT}/scripts/verify-approved.sh .claude-harness/{session_id}/plan-review/report.md"
         - skill: tdd
     gates:
       # agent: を設定すると、このゲートは review-board と同様に独立コンテキストの
