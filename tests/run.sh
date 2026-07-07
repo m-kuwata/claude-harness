@@ -90,6 +90,10 @@ workflows:
   agentflow:
     gates:
       - { skill: refactor, agent: arch }
+  planflow:
+    entry:
+      gates:
+        - { skill: plan, agent: arch, verify: "bash ${HARNESS_PLUGIN_ROOT}/scripts/verify-plan.sh .claude-harness/{session_id}/plan/report.md" }
 EOF
 
 echo "== 1. コンパイル =="
@@ -291,6 +295,36 @@ bash "$PLUGIN/scripts/mark-gate-passed.sh" checkpoint "$ltoken" >/dev/null
 jq -n --arg sid "$CSID" --arg cwd "$ROOT" '{session_id:$sid, cwd:$cwd, tool_name:"", tool_input:{}}' | hook stop-sequencer.sh >/dev/null
 t "gate_passed が記録される（SessionEnd後も消えない永続ログ）" bash -c "jq -e 'select(.event==\"gate_passed\")' '$ROOT/.claude-harness/progress.log' >/dev/null"
 rm -f "$ROOT/.verify-ok"
+export CLAUDE_SESSION_ID="$SID"
+
+echo "== 6g. plan entry ゲート（Anthropic Planner相当・着手前の計画） =="
+PSID="sess-plan-1"
+export CLAUDE_SESSION_ID="$PSID"
+(cd "$ROOT" && bash "$PLUGIN/scripts/flow-start.sh" planflow 99 >/dev/null 2>&1)
+
+# entry ゲートは編集より前に要求される（tdd と同様、実装ファイルへの編集も
+# この時点ではまだ許可されない設計だが、ここでは Stop の要求内容を確認する）
+out=$(jq -n --arg sid "$PSID" --arg cwd "$ROOT" '{session_id:$sid, cwd:$cwd, tool_name:"", tool_input:{}}' | hook stop-sequencer.sh)
+assert_contains "entry ゲートも agent: があれば /gate-run を要求する（flow-start の表示バグを含め検証）" "/gate-run plan" "$out"
+ptoken=$(jq -r '.pending_token.token' "$HARNESS_STATE_DIR/testproj/$PSID.json")
+
+prep=$(bash "$PLUGIN/scripts/gate-run-prep.sh" plan 2>/dev/null)
+t "gate-run-prep が plan ゲートにも使える" jq -e '.persona.agent == "harness:architect-reviewer"' <<<"$prep"
+assert_contains "ticket が宣言時の値を反映する（diffではなくticket文脈が必要な計画系ゲート）" "99" "$(jq -r '.ticket' <<<"$prep")"
+artifact=$(jq -r '.artifact_path' <<<"$prep")
+assert_contains "artifact_path が plan 配下でセッションスコープされる" "plan" "$artifact"
+
+bash "$PLUGIN/scripts/mark-gate-passed.sh" plan "$ptoken" >/dev/null
+out=$(jq -n --arg sid "$PSID" --arg cwd "$ROOT" '{session_id:$sid, cwd:$cwd, tool_name:"", tool_input:{}}' | hook stop-sequencer.sh)
+assert_contains "計画ファイル未作成なら verify-plan.sh が却下する" "検証" "$out"
+
+mkdir -p "$(dirname "$ROOT/$artifact")"
+printf '# 実装計画\n\n## スコープ\nダミー\n\n## スコープ外\nダミー\n\n## リスク\nダミー\n' > "$ROOT/$artifact"
+bash "$PLUGIN/scripts/mark-gate-passed.sh" plan "$ptoken" >/dev/null
+out=$(jq -n --arg sid "$PSID" --arg cwd "$ROOT" '{session_id:$sid, cwd:$cwd, tool_name:"", tool_input:{}}' | hook stop-sequencer.sh)
+assert_empty "十分な内容の計画ファイルがあれば通過する" x "$out"
+t "gates.plan が passed になる" jq -e '.gates.plan.status == "passed"' "$HARNESS_STATE_DIR/testproj/$PSID.json"
+rm -rf "$ROOT/.claude-harness/$PSID"
 export CLAUDE_SESSION_ID="$SID"
 
 echo "== 7. セッション分離 =="

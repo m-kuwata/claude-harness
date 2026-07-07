@@ -35,6 +35,9 @@ ci:
     - run: "npx tsc --noEmit"
 
 personas:
+  planner:
+    agent: harness:planner
+    context: [CLAUDE.md, docs/architecture.md]
   qa:
     agent: harness:qa-reviewer
     context: [CLAUDE.md]
@@ -53,6 +56,13 @@ workflows:
     entry:
       require_ticket: true
       gates:
+        # Anthropic の harness 設計記事（Planner/Generator/Evaluator）に倣い、
+        # 着手前に独立コンテキストのプランナーへスコープを切らせる。
+        # plan は entry ゲートなので、計画が通るまで実装ファイルの編集自体が
+        # ブロックされる（Sprint contracts: 実装前に計画を確定させる）。
+        - skill: plan
+          agent: planner
+          verify: "bash ${HARNESS_PLUGIN_ROOT}/scripts/verify-plan.sh .claude-harness/{session_id}/plan/report.md"
         - skill: tdd
     gates:
       # agent: を設定すると、このゲートは review-board と同様に独立コンテキストの

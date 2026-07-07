@@ -69,7 +69,10 @@ perm=$(jq -r --arg w "$workflow" '.workflows[$w].permissions' "$lock")
 echo ""
 echo "ゲート計画（Stop フックがこの順に要求します）:"
 jq -r --arg w "$workflow" '
-  ((.workflows[$w].entry.gates // []) | map("  [entry] /" + .skill)) +
+  ((.workflows[$w].entry.gates // []) | map(
+    "  [entry] " + (if .agent then "/gate-run " + .skill + " (独立コンテキスト・ペルソナ: " + .agent + ")"
+                    else "/" + .skill end)
+  )) +
   ((.workflows[$w].gates // []) | map(
     "  " + (if .when then "[" + .when + " 変更時] " else "" end) +
     (if .agent then "/gate-run " + .skill + " (独立コンテキスト・ペルソナ: " + .agent + ")"

@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # harness.yaml でゲートに agent: が設定されている任意のスキルを、
 # 独立コンテキストのサブエージェントとして実行するための準備。
-# ペルソナ定義（agent/model/context）・元スキルの指示内容・diff・
-# セッション+ゲート名スコープのアーティファクト出力先を JSON で出力する。
+# ペルソナ定義（agent/model/context）・元スキルの指示内容・diff・チケット内容
+# （github-issues なら gh で本文取得）・セッション+ゲート名スコープの
+# アーティファクト出力先を JSON で出力する。
+# diff はレビュー系ゲート、チケットは entry の計画系ゲート（plan 等）向け。
+# どちらも常に取得を試み、値が空かどうかは呼び出し側（/gate-run）が判断する。
 # Usage: gate-run-prep.sh <gate-skill-name> [--pr <番号>]
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/../hooks/lib.sh"
@@ -25,6 +28,7 @@ sp=$(state_path "$lock" "$sid")
 [ -f "$sp" ] || { echo "エラー: セッション状態が見つかりません。/flow でワークフローを宣言してください" >&2; exit 1; }
 workflow=$(jq -r '.workflow // empty' "$sp")
 [ -z "$workflow" ] && { echo "エラー: ワークフロー未宣言です。/flow で宣言してください" >&2; exit 1; }
+ticket=$(jq -r '.ticket // empty' "$sp")
 
 gate=$(jq -c --arg w "$workflow" --arg s "$skill" \
   '((.workflows[$w].entry.gates // []) + (.workflows[$w].gates // [])) | .[] | select(.skill == $s)' "$lock")
@@ -36,15 +40,25 @@ agent_name=$(echo "$gate" | jq -r '.agent // empty')
 persona=$(jq -c --arg a "$agent_name" '.personas[$a] // empty' "$lock")
 [ -z "$persona" ] && { echo "エラー: personas.'$agent_name' が harness.yaml に未定義です" >&2; exit 1; }
 
-# 元スキルの指示内容（プロジェクト固有を優先、なければプラグイン同梱）
+# 元スキルの指示内容（プロジェクト固有を優先、なければプラグイン同梱）。
+# 見つからない場合はサブエージェント自身の agent 定義（システムプロンプト）
+# だけで完結する想定として扱う（例: planner はこれで足りる）。
 skill_md=""
 for cand in "$root/.claude/skills/$skill/SKILL.md" "$HARNESS_PLUGIN_ROOT/skills/$skill/SKILL.md"; do
   if [ -f "$cand" ]; then skill_md="$cand"; break; fi
 done
-[ -z "$skill_md" ] && echo "⚠ スキル '$skill' の SKILL.md が見つかりません（プロジェクト .claude/skills/ にもプラグインにもない）。指示内容なしでサブエージェントを起動することになります。" >&2
 
+# diff（review 系ゲート向け）
 diff_file=$(gather_diff "$root" "$pr")
-artifact_path=$(gate_artifact_path "$root" "$sid" "$skill" "report.json")
+
+# チケット内容（plan 等の entry ゲート向け。github-issues なら本文取得）
+ticket_body=""
+provider=$(jq -r '.tickets.provider // "none"' "$lock")
+if [ -n "$ticket" ] && [ "$provider" = "github-issues" ] && command -v gh >/dev/null 2>&1; then
+  ticket_body=$( (cd "$root" && gh issue view "${ticket#\#}" --json title,body -q '.title + "\n\n" + .body' 2>/dev/null) || echo "")
+fi
+
+artifact_path=$(gate_artifact_path "$root" "$sid" "$skill" "report.md")
 
 jq -n \
   --arg root "$root" \
@@ -52,6 +66,8 @@ jq -n \
   --argjson persona "$persona" \
   --arg skill_md "$skill_md" \
   --arg diff_file "$diff_file" \
+  --arg ticket "$ticket" \
+  --arg ticket_body "$ticket_body" \
   --arg artifact "$artifact_path" \
   '{
     root: $root,
@@ -59,5 +75,7 @@ jq -n \
     persona: $persona,
     skill_md_path: $skill_md,
     diff_file: $diff_file,
+    ticket: $ticket,
+    ticket_body: $ticket_body,
     artifact_path: $artifact
   }'
