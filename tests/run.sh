@@ -442,6 +442,12 @@ auditout=$(bash "$PLUGIN/scripts/harness-audit.sh" "$ROOT" 2>&1); rc=$?
 t "FATAL なしで exit 0" test "$rc" = 0
 assert_contains "コンパイル成功を報告" "コンパイル成功" "$auditout"
 assert_contains "欠落スキルを WARN" "WARN" "$auditout"
+assert_contains "agent 付きゲートは SKILL.md 不要として WARN しない" "agent 付き。/gate-run 経由のため SKILL.md 不要" "$auditout"
+if echo "$auditout" | grep -q "スキル 'plan' がプロジェクト"; then
+  FAIL=$((FAIL+1)); echo "  NG: agent 付き plan ゲートが誤って WARN されている"
+else
+  PASS=$((PASS+1)); echo "  ok: agent 付き plan ゲートが WARN されない（実地検証で発見した誤検知の回帰防止）"
+fi
 
 echo "== 12. review-board-prep =="
 prep=$(bash "$PLUGIN/scripts/review-board-prep.sh" --personas qa 2>/dev/null)

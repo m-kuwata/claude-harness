@@ -41,6 +41,9 @@ if [ "$plugin_ver" = "$lock_ver" ]; then ok "plugin v$plugin_ver = lock v$lock_v
 else warn "plugin v$plugin_ver と lock v$lock_ver が不一致（lock を再コンパイルしてください）"; fi
 
 echo "[3] ゲートが参照するスキルの存在"
+# agent: 付きゲートは /gate-run + エージェント定義で実行されるため SKILL.md 不要。
+# SKILL.md の存在を要求するのは agent: なし（メインコンテキストで /<skill> を
+# 直接実行する）ゲートだけ。
 while IFS= read -r skill; do
   [ -z "$skill" ] && continue
   if [ -f "$root/.claude/skills/$skill/SKILL.md" ] || [ -f "$PLUGIN_ROOT/skills/$skill/SKILL.md" ]; then
@@ -48,7 +51,11 @@ while IFS= read -r skill; do
   else
     warn "ゲートが参照するスキル '$skill' がプロジェクト（.claude/skills/）にもプラグインにも見つかりません"
   fi
-done < <(jq -r '[.workflows[] | ((.entry.gates // []) + (.gates // []))[] | .skill] | unique[]' "$lock")
+done < <(jq -r '[.workflows[] | ((.entry.gates // []) + (.gates // []))[] | select(.agent == null) | .skill] | unique[]' "$lock")
+while IFS= read -r skill; do
+  [ -z "$skill" ] && continue
+  ok "スキル '$skill'（agent 付き。/gate-run 経由のため SKILL.md 不要）"
+done < <(jq -r '[.workflows[] | ((.entry.gates // []) + (.gates // []))[] | select(.agent != null) | .skill] | unique[]' "$lock")
 
 echo "[4] ペルソナ定義の存在"
 while IFS= read -r line; do
