@@ -61,7 +61,11 @@ echo "[4] ペルソナ定義の存在"
 while IFS= read -r line; do
   [ -z "$line" ] && continue
   name="${line%%|*}"; agent="${line#*|}"
-  base="${agent#harness:}"
+  # compile.py が 'harness:X' を実プラグイン名（plugin.json の name）で解決した
+  # 後の値（例: 'claude-harness:qa-reviewer'）が lock には入っている。
+  # 名前空間プレフィックスはどの名前でも「最後のコロンまで」を切り落とせば良い
+  # （プレフィックスなしの値はそのまま通る）。
+  base="${agent##*:}"
   if [ -f "$PLUGIN_ROOT/agents/$base.md" ] || [ -f "$root/.claude/agents/$base.md" ]; then
     ok "ペルソナ '$name' → agent '$base'"
   else

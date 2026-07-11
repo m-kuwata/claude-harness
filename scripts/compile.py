@@ -8,12 +8,41 @@ stdout: lock JSON
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 from datetime import datetime, timezone
 
 VALID_PERMISSIONS = {"edit", "read-only"}
 VALID_PROVIDERS = {"github-issues", "github-projects", "none"}
+
+
+def resolve_agent_prefix(agent, err):
+    """harness.yaml の persona.agent は可読性のため 'harness:<name>' 形式で書く。
+    実際に Agent ツールへ渡す subagent_type は、プラグインとして install された
+    ときに Claude Code が登録する '<plugin.json の name>:<name>' 形式でなければ
+    ならない（例: 'claude-harness:qa-reviewer'）。'harness:' はプラグイン名と
+    一致する保証がないため、.claude-plugin/plugin.json から実名を読んで
+    ここで解決する。plugin.json が見つからない場合は 'harness:' のまま返し、
+    呼び出し側（gate-run 等）に解決を委ねる（プラグイン未 install の開発時など）。
+    """
+    if not agent.startswith("harness:"):
+        return agent
+    plugin_root = os.environ.get("HARNESS_PLUGIN_ROOT")
+    if not plugin_root:
+        return agent
+    manifest_path = os.path.join(plugin_root, ".claude-plugin", "plugin.json")
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        err(f"personas: .claude-plugin/plugin.json を読めません（{manifest_path}）: {e}")
+        return agent
+    real_name = manifest.get("name")
+    if not real_name:
+        err(f"personas: .claude-plugin/plugin.json に name がありません（{manifest_path}）")
+        return agent
+    return real_name + ":" + agent[len("harness:"):]
 
 
 def expand_braces(pattern):
@@ -132,8 +161,12 @@ def main():
     # ---- personas ----
     personas = cfg.get("personas") or {}
     for name, p in personas.items():
-        if not (p or {}).get("agent"):
+        p = p or {}
+        if not p.get("agent"):
             err(f"personas.{name}: agent は必須です")
+            continue
+        p["agent"] = resolve_agent_prefix(p["agent"], err)
+        personas[name] = p
 
     # ---- workflows ----
     workflows = cfg.get("workflows") or {}

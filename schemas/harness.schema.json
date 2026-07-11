@@ -118,7 +118,7 @@
         "required": ["agent"],
         "additionalProperties": false,
         "properties": {
-          "agent": { "type": "string", "description": "harness:<名前> はプラグイン同梱 agent" },
+          "agent": { "type": "string", "description": "harness:<名前> はプラグイン同梱 agent。コンパイル時に実際の subagent_type（'<plugin.json の name>:<名前>'。例: claude-harness:qa-reviewer）へ自動解決される" },
           "model": { "type": "string" },
           "context": { "type": "array", "items": { "type": "string" }, "description": "ペルソナに読ませる資料パス" }
         }
